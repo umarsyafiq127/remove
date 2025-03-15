@@ -1,48 +1,43 @@
-from flask import Flask, render_template, request, send_from_directory
-import os
+from flask import Flask, request, jsonify, send_file
 from rembg import remove
 from PIL import Image
 import io
+import base64
 
 app = Flask(__name__)
 
-# Direktori untuk menyimpan gambar yang diunggah dan hasilnya
-UPLOAD_FOLDER = "static/uploads"
-RESULT_FOLDER = "static/results"
+@app.route('/')
+def home():
+    return jsonify({"message": "Remove BG API is running!"})
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULT_FOLDER, exist_ok=True)
+@app.route('/remove-bg', methods=['POST'])
+def remove_bg():
+    try:
+        # Pastikan ada file dalam request
+        if 'image' not in request.files:
+            return jsonify({"error": "No image uploaded"}), 400
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        if "file" not in request.files:
-            return "Tidak ada file yang diunggah"
+        # Ambil gambar dari request
+        image_file = request.files['image']
+        image_pil = Image.open(image_file)
 
-        file = request.files["file"]
-        if file.filename == "":
-            return "Pilih file terlebih dahulu"
+        # Hapus background
+        image_bytes = io.BytesIO()
+        image_pil.save(image_bytes, format="PNG")
+        output_bytes = remove(image_bytes.getvalue())
+        
+        # Simpan hasil ke buffer
+        output_image = Image.open(io.BytesIO(output_bytes))
+        output_io = io.BytesIO()
+        output_image.save(output_io, format="PNG")
+        output_io.seek(0)
 
-        if file:
-            # Simpan gambar yang diunggah
-            input_path = os.path.join(UPLOAD_FOLDER, file.filename)
-            file.save(input_path)
+        # Kirim hasil sebagai file
+        return send_file(output_io, mimetype="image/png")
 
-            # Proses hapus background
-            output_filename = "no_bg_" + file.filename
-            output_path = os.path.join(RESULT_FOLDER, output_filename)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-            with open(input_path, "rb") as inp_file:
-                image = inp_file.read()
-            
-            output_image = remove(image)
-
-            with open(output_path, "wb") as out_file:
-                out_file.write(output_image)
-
-            return render_template("index.html", input_image=input_path, output_image=output_path)
-
-    return render_template("index.html", input_image=None, output_image=None)
-
-if __name__ == "__main__":
-    app.run(debug=True)
+# Handler untuk Vercel
+def handler(request):
+    return app(request)
